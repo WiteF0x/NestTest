@@ -27,8 +27,8 @@ export class TokenService {
     return await this.tokenModel.deleteMany({ uId });
   };
 
-  async exists(uId: string, token: string): Promise<boolean> {
-    return await this.tokenModel.exists({ uId, token });
+  async exists(token: string): Promise<boolean> {
+    return await this.tokenModel.exists({ token });
   }
 
   async verify(token: any): Promise<boolean> {
