@@ -1,19 +1,15 @@
-import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import * as moment from 'moment';
+import * as mailgun from 'mailgun-js';
 import { UserService } from 'src/user/user.service';
 import { TokenService } from 'src/token/token.service';
 import { CreateUserDto } from 'src/user/dto/create-user.dto';
-import { CreateUserTokenDto } from '../token/dto/create-user-token.dto';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { IUser } from '../user/interfaces/user.interface';
+import { passwrodRecoveryPage } from '../constants/password.recovery';
 
 @Injectable()
 export class AuthService {
     constructor(
-        @InjectModel('User') private readonly userModel: Model<IUser>,
         private readonly jwtService: JwtService,
         private readonly userService: UserService,
         private readonly tokenService: TokenService,
@@ -24,41 +20,56 @@ export class AuthService {
         return newUser;
     }
 
-    async signIn(email, password) {
-        const user = await this.userModel.findOne({ email });
-        if (!user) {
-            throw new BadRequestException();
-        }
-        
-        const isValidPassword = await bcrypt.compare(password, user.password);
+    async signIn(email: string, pass: string) {
+        const user = await this.userService.getUserByEmail(email);
+        const { password, _id, roles } = user;
+        const isValidPassword = await bcrypt.compare(pass, password);
         if (!isValidPassword) {
             throw new BadRequestException();
         }
-        const token = this.jwtService.sign({ _id: user._id, roles: user.roles })
-        const date = new Date();
-        date.setDate(new Date().getDate() + 1);
-        const expireAt = moment(date).format('YYYY-MM-DD')
-        const generatedToken = await this.tokenService.create({ token, uId: user._id, expireAt });
-        return { success: true, token: generatedToken.token };
+
+        const generatedToken = await this.tokenService.generateToken(_id, roles)
+        return { user, token: generatedToken.token };
+    };
+
+    async restorePassword(uId, oldPassword, newPassword, tok) {
+        const token = tok.slice(7);
+        const isExists = this.tokenService.exists(token);
+        if (!isExists) throw new UnauthorizedException();
+
+        return await this.userService.restorePassword(uId, oldPassword, newPassword)
     }
 
-    private async verifyToken(token): Promise<any> {
-        try {
-            const data = this.jwtService.verify(token);
-            const tokenExists = await this.tokenService.exists(data._id, token);
+    async sendMessage(email) {
+        const { _id, roles } = await this.userService.getUserByEmail(email);
+        const { token } = await this.tokenService.generateToken(_id, roles);
 
-            if (tokenExists) {
-                return data;
-            }
-            throw new UnauthorizedException();
-        } catch (error) {
-            throw new UnauthorizedException();
-        }
-    }
+        var DOMAIN = process.env.DOMAIN;
+        var api_key = process.env.API_KEY;
+        const mg = mailgun({apiKey: api_key, domain: DOMAIN});
+        
+        const data = {
+            from: 'NestJs Service <opengeekslabdk@gmail.com>',
+            to: email,
+            subject: 'Reset password',
+            html: passwrodRecoveryPage(token),
+        };
 
-    private async saveToken(createUserTokenDto: CreateUserTokenDto) {
-        const userToken = await this.tokenService.create(createUserTokenDto);
+        mg.messages().send(data, function(error, body) {
+            console.log(body);
+        });
+    };
 
-        return userToken;
+    async resetPassword(token: string, password: string,) {
+        const decodedToken = this.jwtService.decode(token);
+        const isExists = await this.tokenService.exists(token);
+        if (!isExists) throw new UnauthorizedException();
+
+        const user = await this.userService.resetPassword(decodedToken, password);
+        if (!user._id) throw new BadRequestException();
+
+        await this.tokenService.delete(user._id, token);
+        return { success: true }
+        
     }
 }

@@ -29,10 +29,5 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException();
     }
 
-    const decodedToken = this.jwtService.decode(token);
-    const isVerified = await this.tokenService.verify(decodedToken)
-    if (!isVerified) {
-      throw new UnauthorizedException();
-    }
   }
 }

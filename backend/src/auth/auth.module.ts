@@ -7,8 +7,6 @@ import { UserModule } from '../user/user.module';
 import { JwtStrategy } from './jwt.strategy';
 import { TokenModule } from '../token/token.module';
 import { envConfig } from '../config/confige.root';
-import { UserSchema } from '../user/schemas/user.schema';
-import { MongooseModule } from '@nestjs/mongoose';
 
 @Module({
   imports: [
@@ -20,7 +18,6 @@ import { MongooseModule } from '@nestjs/mongoose';
       secret: process.env.JWT_SECRET,
       signOptions: { expiresIn: '1d' },
     }),
-    MongooseModule.forFeature([{name: 'User', schema: UserSchema}])
   ],
   providers: [AuthService, JwtStrategy],
   controllers: [AuthController],

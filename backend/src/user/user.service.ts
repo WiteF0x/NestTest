@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import * as mongoose from 'mongoose';
 import { Model } from 'mongoose';
@@ -6,14 +6,26 @@ import * as bcrypt from 'bcrypt';
 import * as _ from 'lodash';
 import { IUser } from './interfaces/user.interface';
 import { CreateUserDto } from './dto/create-user.dto';
-
+import { UpdateUserDto } from './dto/update-user.dto';
+import { TokenService } from '../token/token.service';
 
 @Injectable()
 export class UserService {
-  constructor(@InjectModel('User') private readonly userModel: Model<IUser>) {}
+  constructor(
+    @InjectModel('User') private readonly userModel: Model<IUser>,
+    private readonly tokenService: TokenService,
+    ) {}
 
-  async getAll(): Promise<Array<IUser>> {
+  async getAll() {
     return await this.userModel.find().exec();
+  }
+
+  async getUserByEmail(email) {
+    const user = await this.userModel.findOne({ email });
+    if (!user) {
+      throw new BadRequestException();
+    }
+    return user;
   }
 
   async create(createUserDto: CreateUserDto): Promise<IUser> {
@@ -25,7 +37,7 @@ export class UserService {
     return await createdUser.save();
   };
 
-  async find(id: IUser['_id']): Promise<IUser> {
+  async find(id: string): Promise<IUser> {
     const user = await this.userModel.findById(mongoose.Types.ObjectId(id)).exec();
 
     if (!user) {
@@ -34,9 +46,9 @@ export class UserService {
     return user;
   };
 
-  async update(user: Partial<IUser>): Promise<Partial<IUser>> {
+  async update(user: UpdateUserDto): Promise<Partial<IUser>> {
     const updatedUser = await this.userModel.aggregate([
-      { $match: { _id: mongoose.Types.ObjectId(user._id) } },
+      { $match: { email: user.email } },
       { $set: { ...user } },
       { $project: {
         email: 1,
@@ -52,12 +64,36 @@ export class UserService {
     return updatedUser;
   };
 
-  async delete(id: IUser['_id']): Promise<IUser> {
+  async delete(id: string): Promise<IUser> {
     const deletedUser = this.userModel.findOneAndDelete({ _id: mongoose.Types.ObjectId(id) });
 
     if (!deletedUser) {
       throw new BadRequestException();
     }
     return deletedUser;
+  };
+
+  async restorePassword(uId, oldPassword, newPassword) {
+    const user = await this.userModel.findById(uId);
+    if (oldPassword !== user.password) throw new BadRequestException();
+
+    const updatedUser = await this.userModel.findOneAndUpdate({ _id: uId }, { $set: { password: newPassword } });
+    if (!updatedUser) throw new ForbiddenException();
+
+    await this.tokenService.deleteAll(uId);
+    const generatedToken = await this.tokenService.generateToken(uId, user.roles)
+
+    return { user, token: generatedToken.token }
+  };
+
+  async resetPassword(token, password ) {
+    if (password.length < 4) throw new BadRequestException();
+
+    const user = await this.userModel.findOneAndUpdate({ _id: token._id }, { $set: { password } })
+    if (!user._id) {
+      throw new ForbiddenException();
+    }
+    return user;
   }
+
 }
